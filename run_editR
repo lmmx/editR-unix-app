@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# If using the word "new"
+DEFAULT_EDITR_DIR=/gits/draftposts/editR/
+DEFAULT_FILE_EXT='md' # must be either markdown (md) or Rmarkdown (Rmd)
+
 editR_SCR_FILENAME="editR_chrome_app.R"
 # Path to this script:
 SELF_SCR_PATH=$(readlink -f "$0")
@@ -8,10 +12,109 @@ editR_LAUNCHER=$(dirname "$SELF_SCR_PATH")/$editR_SCR_FILENAME
 
 # If a (single) arg given, use as filename
 # If zero or >1 args, resort to file selection dialog
+
+function confirm_dir () {
+  if [ -z "$1" ] || [ $1 != '--skip-default-confirmation' ]; then
+    printf "Saving to $DEFAULT_EDITR_DIR [enter to confirm, hit n to change] " 1>&2
+    read dir_conf
+  fi
+  if [ ! -z "$1" ] && [ $1 == '--skip-default-confirmation' ]; then
+    editR_dir=$(zenity --file-selection --directory)
+  elif [ ! -z "$dir_conf" ]; then # hitting enter gives blank variable, can't subset first character
+    if [ ${dir_conf:0:1} == 'n' ] || [ ${dir_conf:0:1} == 'N' ]; then
+      editR_dir=$(zenity --file-selection --directory)
+    else
+      editR_dir=$DEFAULT_EDITR_DIR
+    fi
+  else
+    editR_dir=$DEFAULT_EDITR_DIR
+  fi
+  if [ ! -d "$editR_dir" ] || [ -z "$editR_dir" ]; then
+    printf "WARNING: Default directory '$editR_dir' not found. Please select a folder: " 1>&2
+    confirm_dir --skip-default-confirmation
+  fi
+
+  printf $editR_dir
+  if [ "${editR_dir:-1}" != "/" ]; then echo '/'; fi
+}
+
+function confirm_file_ext () {
+  # Single [obligatory] argument - filename, either with or without an extension
+  if [ -z "$1" ]; then
+    echo "Error: empty filename" 1>&2
+    exit 1
+  fi
+
+  # get filename prefix to return with extension
+  EDITR_FILE_PREFIX=${1%.*}
+
+  # check for a specified file extension
+  if [[ $1 == *"."* ]]; then
+    EDITR_FILE_EXT=${1##*.}
+  else
+    EDITR_FILE_EXT=${DEFAULT_FILE_EXT##*.}
+  fi
+
+  # The {##*.} construct cleans off preceding . from the file extension if present
+  if [ ! -z $EDITR_FILE_EXT ]; then
+    if [ $EDITR_FILE_EXT == 'rmd' ]; then
+      EDITR_FILE_EXT='Rmd'
+    elif [ $EDITR_FILE_EXT != 'md' ] && [ $EDITR_FILE_EXT != 'Rmd' ]; then
+      printf "WARNING: If specified, file extension must be 'md' (markdown) or 'Rmd' (Rmarkdown).\n\
+	      Please provide a filename (if not given, default file extension is $DEFAULT_FILE_EXT: " 1>&2
+      confirm_filename --bad-extension
+      # the --bad-extension option uses the confirm_filename function to request a proper filename
+      return
+    fi
+  else
+    echo "ERROR: The default file extension is missing for editR (it can be 'md' or 'Rmd').\n\
+	    Please set this parameter, specify a valid filename, or open an existing file." 1>&2
+    exit 1
+  fi
+  
+  echo $EDITR_FILE_PREFIX.$EDITR_FILE_EXT
+}
+
+function confirm_filename () {
+  if [ $# -eq 1 ]; then
+    if [ $1 != '--bad-extension' ]; then
+      printf "Creating file '$1' " 1>&2
+      validated_filename=$(confirm_file_ext $1)
+    else
+      printf "Save as: [if unspecified, using extension $DEFAULT_FILE_EXT] " 1>&2
+      read filename_conf
+      validated_filename=$(confirm_file_ext $filename_conf)
+    fi
+  else
+    printf "Save as: [if unspecified, using extension $DEFAULT_FILE_EXT] " 1>&2
+    read filename_conf
+    validated_filename=$(confirm_file_ext $filename_conf)
+  fi
+
+  echo $validated_filename
+}
+
 if [ $# -eq 1 ]; then
-  editR_file=$1
+  if [ $1 == '--new-file' ]; then
+    # this line actually reassigns the variable set within the confirm_dir function
+    editR_dir=$(confirm_dir)
+    cd $editR_dir
+    editR_filename=$(confirm_filename)
+    open_filepath=$editR_dir$editR_filename
+    touch $open_filepath
+  else
+    open_filepath=$1
+  fi
+elif [ $# -eq 2 ]; then
+  if [ $1 == '--new-file' ]; then
+    editR_dir=$(confirm_dir)
+    cd $editR_dir
+    editR_filename=$(confirm_filename $2)
+    open_filepath=$editR_dir$editR_filename
+    touch $open_filepath
+  fi
 else
-  editR_file=$(zenity --file-selection)
+  open_filepath=$(zenity --file-selection)
 fi
 
-Rscript "$editR_LAUNCHER" $editR_file
+Rscript "$editR_LAUNCHER" $open_filepath
